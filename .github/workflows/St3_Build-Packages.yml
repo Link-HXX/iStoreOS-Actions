@@ -1,15 +1,15 @@
-name: 📦 Build iStoreOS Packages (SQM etc.)
+name: 📦 Build OpenWrt SQM Packages
 
 on:
   workflow_dispatch:
     inputs:
-      package_list:
+      packages:
         description: "要编译的包（空格分隔）"
-        required: false
+        required: true
         default: "sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn"
 
 env:
-  VERSION: main  # iStoreOS 默认分支
+  OPENWRT_VERSION: "24.10.4"
 
 jobs:
   build:
@@ -21,53 +21,49 @@ jobs:
       - name: ⏬ 安装依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev zstd git python3 unzip gawk wget gettext
+          sudo apt-get install -y build-essential libncurses5-dev zstd git python3 unzip gawk wget gettext subversion
 
-      - name: 📥 拉取 iStoreOS 源码
+      - name: 📥 拉取 OpenWrt 官方源码
         run: |
-          git clone https://github.com/istoreos/istoreos.git source
+          git clone https://github.com/openwrt/openwrt.git source
           cd source
-          git checkout ${{ env.VERSION }}
+          git checkout v${{ env.OPENWRT_VERSION }}
 
-      - name: 📡 更新 feeds
+      - name: 📦 更新 feeds
         working-directory: ./source
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: ⚙️ 生成 .config 并启用 SQM 包
+      - name: ⚙️ 设置编译目标
         working-directory: ./source
         run: |
-          # 设置目标设备
-          echo "CONFIG_TARGET_armsr_armv8=y" > .config
-          echo "CONFIG_TARGET_armsr_armv8_DEVICE_generic=y" >> .config
-          
-          # 启用 SQM 包
-          echo "CONFIG_PACKAGE_sqm-scripts=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-sqm=y" >> .config
-          echo "CONFIG_PACKAGE_luci-i18n-sqm-zh-cn=y" >> .config
-          
-          # 生成默认配置
+          # 示例目标，可根据实际硬件修改
+          echo "CONFIG_TARGET_rockchip=y" > .config
+          echo "CONFIG_TARGET_rockchip_DEVICE_generic=y" >> .config
+          # 启用 SQM 所需 kernel module
+          echo "CONFIG_NET_SCH_HTB=y" >> .config
+          echo "CONFIG_NET_SCH_FQ_CODEL=y" >> .config
           make defconfig
 
       - name: 🧱 编译指定包
         working-directory: ./source
         run: |
-          for pkg in ${{ inputs.package_list }}; do
+          for pkg in ${{ inputs.packages }}; do
             make package/$pkg/compile V=s -j$(nproc)
           done
 
-      - name: 📦 打包编译结果
+      - name: 📦 收集编译结果
         run: |
           mkdir -p output
           find source/bin/packages/ -name "*.ipk" -exec cp {} output/ \;
           find source/bin/targets/ -name "*.ipk" -exec cp {} output/ \;
           ls -lh output
 
-      - name: 🚀 上传到 Release
+      - name: 🚀 上传到 GitHub Release
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: Packages-${{ env.VERSION }}
+          tag_name: Packages-${{ env.OPENWRT_VERSION }}
           files: output/*.ipk
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
