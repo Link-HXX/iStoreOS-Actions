@@ -1,0 +1,64 @@
+name: 📦 Build iStoreOS Packages (SQM etc.)
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_list:
+        description: "要编译的包（空格分隔）"
+        required: true
+        default: "sqm-scripts luci-app-sqm"
+
+env:
+  VERSION: 24.10.4
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: ⏬ 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev zstd git python3 unzip gawk wget gettext
+
+      - name: 📥 拉取 iStoreOS 源码（或 OpenWrt 源码）
+        run: |
+          git clone https://github.com/istoreos/istoreos.git source
+          cd source
+          # 切换到与你 imagebuilder 匹配的版本
+          git checkout v${{ env.VERSION }}
+
+      - name: 📦 更新 feeds
+        working-directory: ./source
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: ⚙️ 设置编译目标
+        working-directory: ./source
+        run: |
+          echo "CONFIG_TARGET_armsr_armv8=y" > .config
+          echo "CONFIG_TARGET_armsr_armv8_DEVICE_generic=y" >> .config
+          make defconfig
+
+      - name: 🧱 编译指定包
+        working-directory: ./source
+        run: |
+          make package/${{ inputs.package_list }}/compile V=s -j$(nproc)
+
+      - name: 📦 打包编译结果
+        run: |
+          mkdir -p output
+          find source/bin/packages/ -name "*.ipk" -exec cp {} output/ \;
+          find source/bin/targets/ -name "*.ipk" -exec cp {} output/ \;
+          ls -lh output
+
+      - name: 🚀 上传到 Release
+        uses: softprops/action-gh-release@v2.2.1
+        with:
+          tag_name: Packages-${{ env.VERSION }}
+          files: output/*.ipk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
