@@ -5,15 +5,11 @@ on:
     inputs:
       package_list:
         description: "要编译的包（空格分隔）"
-        required: true
-        default: "sqm-scripts luci-app-sqm"
-      openwrt_board:
-        description: "设备型号"
-        required: true
-        default: "wxy-oect"
+        required: false
+        default: "sqm-scripts luci-app-sqm luci-i18n-sqm-zh-cn"
 
 env:
-  VERSION: 24.10.4
+  VERSION: main  # iStoreOS 默认分支
 
 jobs:
   build:
@@ -31,26 +27,35 @@ jobs:
         run: |
           git clone https://github.com/istoreos/istoreos.git source
           cd source
-          git fetch --all
-          git checkout main  # 使用 main 分支，避免不存在的 tag
+          git checkout ${{ env.VERSION }}
 
-      - name: 📦 更新 feeds
+      - name: 📡 更新 feeds
         working-directory: ./source
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: ⚙️ 设置编译目标
+      - name: ⚙️ 生成 .config 并启用 SQM 包
         working-directory: ./source
         run: |
+          # 设置目标设备
           echo "CONFIG_TARGET_armsr_armv8=y" > .config
           echo "CONFIG_TARGET_armsr_armv8_DEVICE_generic=y" >> .config
+          
+          # 启用 SQM 包
+          echo "CONFIG_PACKAGE_sqm-scripts=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-sqm=y" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-sqm-zh-cn=y" >> .config
+          
+          # 生成默认配置
           make defconfig
 
       - name: 🧱 编译指定包
         working-directory: ./source
         run: |
-          make package/${{ inputs.package_list }}/compile V=s -j$(nproc)
+          for pkg in ${{ inputs.package_list }}; do
+            make package/$pkg/compile V=s -j$(nproc)
+          done
 
       - name: 📦 打包编译结果
         run: |
@@ -62,7 +67,7 @@ jobs:
       - name: 🚀 上传到 Release
         uses: softprops/action-gh-release@v2.2.1
         with:
-          tag_name: Packages-${{ env.VERSION }}-${{ inputs.openwrt_board }}
+          tag_name: Packages-${{ env.VERSION }}
           files: output/*.ipk
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
